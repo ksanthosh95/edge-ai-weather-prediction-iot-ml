@@ -1,0 +1,144 @@
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+  nextcloud:
+    driver: bridge
+    internal: true
+    ipam:
+      driver: default
+
+services:
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    restart: unless-stopped
+    user: "0"
+    ports:
+      - "3000:3000"
+    environment:
+      - TZ=Etc/UTC
+    volumes:
+      - ./volumes/grafana/data:/var/lib/grafana
+      - ./volumes/grafana/log:/var/log/grafana
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.shanthosh.in`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "wget", "-O", "/dev/null", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  mariadb:
+    build: ./.templates/mariadb/.
+    container_name: mariadb
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+      - PUID=1000
+      - PGID=1000
+      - MYSQL_ROOT_PASSWORD=IOtSt4ckToorMariaDb
+      - MYSQL_DATABASE=default
+      - MYSQL_USER=mariadbuser
+      - MYSQL_PASSWORD=IOtSt4ckmariaDbPw
+    volumes:
+      - ./volumes/mariadb/config:/config
+      - ./volumes/mariadb/db_backup:/backup
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mariadb.rule=Host(`mariadb.shanthosh.in`)"
+      - "traefik.http.routers.mariadb.entrypoints=websecure"
+      - "traefik.http.routers.mariadb.tls.certresolver=myresolver"
+      - "traefik.http.services.mariadb.loadbalancer.server.port=3306"
+    networks:
+      - default
+  mosquitto:
+    container_name: mosquitto
+    build:
+      context: ./.templates/mosquitto/.
+      args:
+        - MOSQUITTO_BASE=eclipse-mosquitto:latest
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./volumes/mosquitto/config:/mosquitto/config
+      - ./volumes/mosquitto/data:/mosquitto/data
+      - ./volumes/mosquitto/log:/mosquitto/log
+      - ./volumes/mosquitto/pwfile:/mosquitto/pwfile
+
+  nodered:
+    container_name: nodered
+    build:
+      context: ./services/nodered/.
+      args:
+        - DOCKERHUB_TAG=latest
+        - EXTRA_PACKAGES=
+    restart: unless-stopped
+    user: "0"
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+    ports:
+      - "1880:1880"
+    volumes:
+      - ./volumes/nodered/data:/data
+      - ./volumes/nodered/ssh:/root/.ssh
+  portainer-ce:
+    container_name: portainer-ce
+    image: portainer/portainer-ce
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "9000:9000"
+      # HTTPS
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./volumes/portainer-ce/data:/data
+  traefik:
+    container_name: traefik
+    image: traefik:v2.10
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true" # Enable Traefik dashboard (optional, remove in production)
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=ksanthosh95@gmail.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--api.dashboard=true" # Enable the dashboard
+    ports:
+      - "80:80" # HTTP
+      - "443:443" # HTTPS
+      - "8080:8080" # Traefik Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./volumes/traefik/letsencrypt:/letsencrypt
+    networks:
+      - default
+    labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.traefik.rule=Host(`dashboard.shanthosh.in`)"
+    - "traefik.http.routers.traefik.service=api@internal"
+    - "traefik.http.routers.traefik.entrypoints=websecure"
+    - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+  adminer:
+    container_name: adminer
+    image: adminer
+    restart: unless-stopped
+    ports:
+    - "9080:8080"
